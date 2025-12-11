@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Reconciliation System</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Financial Reconciliation System</h1>
+            <p class="subtitle">AI-Powered Agentic Workflow</p>
+        </header>
+
+        <main>
+            <section class="control-panel">
+                <button id="startBtn" class="btn-primary">
+                    Start Reconciliation
+                </button>
+                <div id="runInfo" class="run-info hidden">
+                    <span>Run ID: <strong id="runId"></strong></span>
+                    <span class="status-badge" id="statusBadge">Initializing</span>
+                </div>
+            </section>
+
+            <section class="progress-section hidden" id="progressSection">
+                <h2>Progress</h2>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p class="progress-text">
+                    <span id="progressPercent">0%</span> - 
+                    <span id="currentStep">Waiting...</span>
+                </p>
+            </section>
+
+            <section class="agents-section">
+                <h2>Agent Pipeline</h2>
+                <div class="agent-flow">
+                    <div class="agent-node" id="agent-ingest_bank">
+                        <div class="agent-icon">1</div>
+                        <span>Bank Ingest</span>
+                    </div>
+                    <div class="agent-arrow">→</div>
+                    <div class="agent-node" id="agent-ingest_erp">
+                        <div class="agent-icon">2</div>
+                        <span>ERP Ingest</span>
+                    </div>
+                    <div class="agent-arrow">→</div>
+                    <div class="agent-node" id="agent-dedupe">
+                        <div class="agent-icon">3</div>
+                        <span>Dedupe</span>
+                    </div>
+                    <div class="agent-arrow">→</div>
+                    <div class="agent-node" id="agent-matcher">
+                        <div class="agent-icon">4</div>
+                        <span>Matcher</span>
+                    </div>
+                    <div class="agent-arrow">→</div>
+                    <div class="agent-node" id="agent-classifier">
+                        <div class="agent-icon">5</div>
+                        <span>Classifier</span>
+                    </div>
+                    <div class="agent-arrow">→</div>
+                    <div class="agent-node" id="agent-explain">
+                        <div class="agent-icon">6</div>
+                        <span>Explain</span>
+                    </div>
+                    <div class="agent-arrow">→</div>
+                    <div class="agent-node" id="agent-output">
+                        <div class="agent-icon">7</div>
+                        <span>Output</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="logs-section">
+                <h2>Agent Logs <span class="log-count" id="logCount">(0)</span></h2>
+                <div class="logs-container" id="logsContainer">
+                    <p class="logs-placeholder">Logs will appear here when reconciliation starts...</p>
+                </div>
+            </section>
+
+            <section class="download-section hidden" id="downloadSection">
+                <h2>Results</h2>
+                <a id="downloadBtn" href="#" class="btn-download">
+                    Download Results (ZIP)
+                </a>
+                <p class="download-info">Includes: Reconciled Excel, Summary PDF, Agent Logs, Workflow Graph</p>
+            </section>
+        </main>
+
+        <footer>
+            <p>Powered by LangChain + LangGraph Agentic AI</p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
