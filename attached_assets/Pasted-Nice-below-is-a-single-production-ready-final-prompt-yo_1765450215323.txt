@@ -1,0 +1,288 @@
+Nice — below is a single, production-ready **final prompt** you can paste into Replit (or into a Replit “assistant” / task description) to spin up the MVP. I act as an *Agentic AI Engineer / Replit expert* and the prompt is written to be *actionable, deterministic, and thorough* so Replit (and a human developer following it) can build the full system right away.
+
+I’ve included: (A) the exact Replit prompt, (B) an explicit folder structure, (C) required environment & packages, (D) top-level implementation tasks (agents, pipelines, APIs, frontend), (E) run & debug commands, (F) logging & evidence requirements, and (G) pointers to the uploaded files you provided so the Replit project wires them in. I reference the assignment brief and the parsed bank statement so the system knows the data and constraints. See the two file citations for those.  
+
+---
+
+# FINAL PROMPT — Paste this into Replit (or give to the Replit dev task runner)
+
+You are an autonomous developer environment on Replit. Your job: create a complete, production-ready **MVP** that performs **financial reconciliation** between an ERP Excel and a Bank Statement PDF using **agentic AI** (LangChain + LangGraph) as the primary mechanism. Do not rely on standalone one-off scripts as the *primary* mechanism — agents must orchestrate parsing, reasoning, matching and produce logs & trace evidence. Follow the assignment constraints in the uploaded brief. 
+
+## Objectives (short)
+
+1. Build an agent-based reconciliation pipeline that ingests the bank statement PDF and ERP Excel, normalizes data, matches invoices, classifies discrepancies, and outputs a reconciled CSV/Excel, a 1–2 page PDF report, and agent logs/trace.
+2. Use LangChain & LangGraph for agent orchestration; allow vector DB (FAISS or Chroma) for storing embeddings (for fuzzy matching & audit), and a small FastAPI backend to run the pipeline and serve status/log endpoints.
+3. Use OpenAI-compatible LLM from Groq platform or Llama 70B (Groq) for agent reasoning. The system should be configurable to swap model endpoints via env variables.
+4. Provide a minimal HTML+CSS frontend that can trigger the reconciliation, show progress & logs, and download outputs.
+5. Provide full console logging for each file & every script run. Make the project a Python package (use `__init__.py` appropriately).
+
+## Important data files (already uploaded)
+
+* Assignment brief: `assignment_brief_updated (2).pdf` — describes constraints: **must** use GenAI/Agentic workflow, produce reconciled CSV + report + evidence. 
+* Bank statement PDF: `bank_statement.pdf` — parsed transaction lines (INV0001…INV0198 etc.) with duplicates and some negative adjustments (fees/interest). Use this as the Bank input. 
+* ERP Excel expected at `/mnt/data/erp_data.xlsx` — ensure the file is present in the Replit workspace; the agent must parse it.
+
+---
+
+## Required tech stack & versions
+
+* Python 3.11+
+* LangChain (latest stable)
+* LangGraph (latest stable)
+* FAISS or Chroma (choose Chroma if FAISS binary issues on Replit)
+* FastAPI (uvicorn) or Flask (FastAPI preferred)
+* pandas, openpyxl, python-multipart (for file handling)
+* PyPDF2 or pdfplumber (to parse bank_statement.pdf) — prefer pdfplumber for robust extraction
+* rich or loguru for console logs (loguru preferred)
+* openai-compatible client / Groq SDK (configure via env var) — make model endpoint pluggable
+* pytest for basic tests, black/isort for formatting
+
+Add these in `pyproject.toml` or `requirements.txt`.
+
+---
+
+## Project folder structure (create exactly)
+
+```
+reconciliation_mvp/
+├─ README.md
+├─ pyproject.toml (or requirements.txt)
+├─ .env.example
+├─ run.sh
+├─ app/
+│  ├─ __init__.py
+│  ├─ main.py            # FastAPI app to expose endpoints
+│  ├─ api/
+│  │  ├─ __init__.py
+│  │  ├─ routes.py       # endpoints: /start, /status, /logs, /download
+│  ├─ agents/
+│  │  ├─ __init__.py
+│  │  ├─ orchestrator.py # Orchestrator agent (LangGraph)
+│  │  ├─ ingest_bank.py   # bank parser agent wrapper (calls pdfplumber)
+│  │  ├─ ingest_erp.py    # ERP parser agent wrapper (reads excel)
+│  │  ├─ matcher.py       # Exact & fuzzy matching agents
+│  │  ├─ dedupe.py        # duplicate detector agent
+│  │  ├─ classifier.py    # exception classifier agent
+│  │  ├─ explain.py       # explainability agent (generate human-friendly reasons)
+│  ├─ core/
+│  │  ├─ __init__.py
+│  │  ├─ config.py       # env loads, thresholds, model config
+│  │  ├─ utils.py        # date/amount normalization, logging helpers
+│  │  ├─ storage.py      # vector DB wrapper (Chroma/FAISS) + file storage helpers
+│  ├─ outputs/
+│  │  ├─ logs/           # agent logs (JSON) and console logs (rotate)
+│  │  ├─ results/        # reconciled CSV/Excel & generated report
+│  ├─ tests/
+│  │  ├─ test_ingest.py
+│  │  ├─ test_matching.py
+├─ frontend/
+│  ├─ index.html
+│  ├─ styles.css
+│  ├─ app.js             # simple fetch to backend endpoints
+├─ notebooks/
+│  ├─ dev_demo.ipynb     # optional interactive demo for debugging
+└─ scripts/
+   ├─ run_reconcile.py   # convenience entry script that calls orchestrator
+   ├─ create_package.sh
+```
+
+---
+
+## Implementation tasks — deliverables & details (highly prescriptive)
+
+### 1) Environment & config
+
+* Create `.env.example` with:
+
+  * `GROQ_API_KEY=`
+  * `GROQ_API_URL=`
+  * `LLM_MODEL=groq-llama-70b` (or `groq-gpt-xxx`)
+  * `VECTOR_DB=chroma`  (or `faiss`)
+  * `LOG_LEVEL=DEBUG`
+* `app/core/config.py` should read these env vars and provide a `Config` object with thresholds:
+
+  * `AMOUNT_ROUNDING_TOLERANCE = 0.01`
+  * `FUZZY_AMOUNT_ABS = 1.0`
+  * `FUZZY_DATE_DAYS = 3`
+  * `CONFIDENCE_THRESHOLD_HUMAN_REVIEW = 0.6`
+
+### 2) Agent orchestration (LangChain + LangGraph)
+
+* `agents/orchestrator.py` must:
+
+  * Initialize LangGraph workflow with nodes: ingest_bank → ingest_erp → dedupe → matcher(exact) → matcher(fuzzy) → classifier → explain → output.
+  * Each node is an agent that may call a small Python function (inside the agent wrapper) to do deterministic work (parsing, numeric comparison). **Important**: those deterministic steps must be invoked by the agent (i.e., agent prompts instruct the agent to run the tool and then produce a natural-language explanation). This satisfies the assignment constraint: agents run code/tools and produce reasoning logs.
+  * For every agent step, save a JSON log with keys: `timestamp`, `agent_name`, `input_summary`, `deterministic_output` (if any), `llm_reasoning`, `decision`, `confidence`, `rule_fired`.
+  * Use LangGraph to capture flow and produce a visual graph (PNG) of node execution (LangGraph or graphviz export).
+
+### 3) Ingest agents
+
+* `ingest_bank.py`: implement an agent wrapper that:
+
+  * Uses `pdfplumber` to extract lines from `/mnt/data/bank_statement.pdf`, parse date, description, invoice id (regex `INV\d+`), amount, and ref id.
+  * Normalize amounts to `round(amount,2)` and dates to ISO `YYYY-MM-DD`.
+  * Detect and flag negative non-invoice lines (Adjustment/Interest/Bank Fee) as `non_invoice`.
+  * Save parsed CSV to `app/outputs/results/bank_parsed.csv`.
+  * Write a log entry with counts and sample 10 rows. Agent must append `llm_reasoning` explaining any ambiguous lines.
+* `ingest_erp.py`: implement an agent wrapper that:
+
+  * Reads `/mnt/data/erp_data.xlsx`. Auto-detect the invoice column (try a list of synonyms) and return warnings if no clear invoice column found.
+  * Normalize amounts & dates similar to bank ingest.
+  * Save parsed CSV to `app/outputs/results/erp_parsed.csv`.
+  * Log schema discovered and sample rows.
+
+### 4) Matcher & Deduper agents
+
+* `matcher.py`:
+
+  * ExactMatch agent: match on `invoice_id` case-insensitive and exact equality on rounded amount → label `Exact Match` with confidence=0.99.
+  * RoundingMatch agent: if invoice matches but amount diff <= AMOUNT_ROUNDING_TOLERANCE → `Rounding Difference`, confidence=0.90.
+  * FuzzyMatch agent: when invoice_id missing or unmatched, find ERP candidate where `abs(amount_diff) <= FUZZY_AMOUNT_ABS` AND `abs(date_diff_days) <= FUZZY_DATE_DAYS`. For candidates compute embedding similarity (vector DB) between `description` and `customer` fields using LLM embeddings stored in Chroma/FAISS. Score with LLM to produce final confidence and one-line explanation.
+  * All matches should include `match_confidence` (float), `rule`, and `explanation`.
+* `dedupe.py`:
+
+  * Identify duplicates (same invoice+amount+date repeats) in each source. Label duplicates `Duplicate in Bank` or `Duplicate in ERP`.
+  * Append dedupe results to log.
+
+### 5) Classifier & Explain agents
+
+* `classifier.py`:
+
+  * For unmatched bank rows produce labels: `Missing in ERP`, `Non-invoice`, `ManualReview`.
+  * For ERP rows not matched to bank produce `Missing in Bank`.
+  * Provide counts, top 10 discrepancies.
+* `explain.py`:
+
+  * Use LLM to generate a human-friendly explanation for each match (one sentence) and a summary paragraph for the whole reconciliation describing logic and thresholds used.
+
+### 6) Output & evidence
+
+* Consolidate results into `outputs/results/reconciled_master.xlsx` with the schema:
+
+  ```
+  bank_ref,bank_date,bank_invoice,bank_amount,erp_row_id,erp_date,erp_invoice,erp_amount,match_status,match_confidence,explanation,agent_log_id
+  ```
+* Produce `outputs/results/summary_report.pdf` (1–2 pages) summarizing counts, reconciliation rate, top issues, and architecture diagram.
+* Produce agent logs in `outputs/logs/` — one JSON file per agent-run timestamped.
+* Provide a `workflow_graph.png` visual of the agent pipeline.
+
+### 7) Backend API (FastAPI)
+
+* `app/main.py` + `app/api/routes.py`:
+
+  * Endpoint `POST /start` — starts a reconciliation run (async) and returns a `run_id`.
+  * Endpoint `GET /status/{run_id}` — returns progress, basic counts.
+  * Endpoint `GET /logs/{run_id}` — returns aggregated logs JSON.
+  * Endpoint `GET /download/{run_id}` — returns zip with reconciled files.
+* The API must write logs to console using `loguru` with **clear tags** like `[AGENT:ingest_bank]` so console traces can be grepped.
+
+### 8) Frontend (HTML + CSS)
+
+* Simple `frontend/index.html` with:
+
+  * Button: “Start Reconciliation” → calls `/start` and polls `/status`.
+  * Live log panel streaming last 200 lines from `/logs/{run_id}`.
+  * Download link when run finishes to `/download/{run_id}`.
+* Keep frontend static and minimal.
+
+### 9) Packaging & module structure
+
+* Make `app` a proper package: all `__init__.py` files present.
+* Provide `scripts/create_package.sh` to build a wheel and `pip install -e .` locally for dev.
+
+### 10) Logging requirements (CRITICAL)
+
+* Every Python module must log all major steps to console and to a rotating file:
+
+  * On agent start: `INFO` — `[AGENT:{name}] START run_id={run_id} inputs=...`
+  * On agent decision: `DEBUG` — `[AGENT:{name}] decision=..., rule=..., confidence=..., duration=...`
+  * On agent finish: `INFO` — `[AGENT:{name}] END run_id=... summary=...`
+* Save LLM responses in logs but truncate responses > 2000 chars to prevent log overflow.
+* Save logs in `app/outputs/logs/{run_id}_agent_{agentname}.json` with full structured fields.
+
+### 11) Tests & sanity checks
+
+* `tests/test_ingest.py` should confirm bank parser extracts `INV0001` with amount `267.10` and that `INV0017` duplicate is detected. (Use assertions on parsed CSV). This ties to the actual bank file. 
+* `tests/test_matching.py` assert exact matching for a known invoice pair (pick one example from bank & matching ERP row).
+
+### 12) Example run scripts & commands
+
+* `scripts/run_reconcile.py` – wrapper that:
+
+  * boots config, creates run_id timestamp,
+  * hits orchestrator.start(run_id),
+  * prints run_id to console and tails logs until completion.
+* Add a simple `run.sh` to create venv, install deps, and start uvicorn:
+
+  ```
+  #!/usr/bin/env bash
+  python -m venv .venv
+  . .venv/bin/activate
+  pip install -r requirements.txt
+  uvicorn app.main:app --host 0.0.0.0 --port 8080
+  ```
+* Add `replit.nix` if Replit needs package builds (optional).
+
+---
+
+## Implementation hints / best practices (for Replit)
+
+* Prefer Chroma over FAISS on Replit for ease of installation; make vector DB optional via `VECTOR_DB` env var.
+* Use `pdfplumber` to robustly extract the tables from `bank_statement.pdf` (we expect "Payment INVxxxx" patterns). Use regex `INV\d{4}` to extract invoice numbers. 
+* For embeddings & similarity: call the Groq/Llama embedding endpoint (configurable). Cache embeddings in the vector DB.
+* Keep agent prompts short but explicit: always request `JSON` output with expected keys so logs are structured.
+* Save ALL agent prompts + LLM responses in `app/outputs/logs/prompts/` (use `run_id` in filename).
+* Make run reproducible: save `Config` snapshot with each run in `outputs/results/{run_id}_config.json`.
+
+---
+
+## Acceptance criteria (how I will grade success)
+
+* The repo runs on Replit, exposes FastAPI UI, and successfully ingests `/mnt/data/bank_statement.pdf` and `/mnt/data/erp_data.xlsx`.
+* Agents produce reconciled Excel/CSV, summary PDF, structured logs, and workflow graph as specified.
+* All console output contains `AGENT` tags and timestamps; logs saved under `app/outputs/logs/`.
+* A basic frontend can start a reconciliation and download outputs.
+* Tests pass (ingest + one matching test).
+
+---
+
+## Extra: concrete prompts & rules to embed (copy these into `app/agents/prompts/*.md`)
+
+1. **Bank ingest agent prompt (template)**
+
+   ```
+   You are BankIngestAgent. Input: raw text/page from bank_statement.pdf.
+   Task: Extract rows with fields: date(YYYY-MM-DD), description, invoice_id (regex INV\d+), amount (float), ref_id.
+   Normalize: round(amount,2), iso-date. Return JSON array `rows`.
+   If a line is ambiguous, include `note` explaining the ambiguity.
+   ```
+2. **Matcher agent prompt (template)**
+
+   ```
+   You are MatcherAgent. Input: one bank_row and a list of ERP candidate rows.
+   Output: JSON with keys: best_candidate_id, match_status (Exact/Rounding/Probable/NoMatch), match_confidence (0-1), explanation (1 sentence), rule_fired (identifier).
+   ```
+3. **Explain agent prompt (template)**
+
+   ```
+   You are ExplainAgent. Input: a match record. Produce 1–2 sentence human readable reason and suggested next action (e.g., accept, escalate, re-run).
+   ```
+
+---
+
+## Final notes & immediate action for Replit
+
+1. Create the repo using the folder structure above and copy the uploaded files to `/mnt/data/`. Confirm presence of:
+
+   * `/mnt/data/bank_statement.pdf` (use this as the bank input). 
+   * `/mnt/data/erp_data.xlsx` (must be available; if not, prompt user to upload).
+   * `/mnt/data/assignment_brief_updated (2).pdf` (for reference). 
+2. Install dependencies and run `scripts/run_reconcile.py` for a quick end-to-end smoke test (the orchestrator should run and create outputs and logs).
+3. Ensure `scripts/create_package.sh` builds a local pip package and `pip install -e .` works.
+
+---
+
+If you want, I will now:
+
+* generate the exact file contents for `pyproject.toml` / `requirements.txt`, the top-level `__init__.py` files, and *starter implementations* for `ingest_bank.py`, `ingest_erp.py`, `orchestrator.py`, and `run_reconcile.py` (with logging and test cases) so you can paste them into Replit immediately.
+  Tell me: do you want me to create those starter files now (I will produce full code for each file in this chat)?
