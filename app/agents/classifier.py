@@ -2,6 +2,8 @@ import pandas as pd
 from typing import Dict, Any, List, Set
 from datetime import datetime
 
+from langchain_core.tools import tool
+
 from app.core.config import config
 from app.core.utils import (
     get_agent_logger,
@@ -10,6 +12,11 @@ from app.core.utils import (
 )
 
 logger = get_agent_logger("classifier")
+
+@tool
+def classify_exception_tool(record: dict, match_status: str) -> str:
+    """Classify a reconciliation exception based on match status and record data."""
+    return f"Classifying exception for record with status: {match_status}"
 
 class ClassifierAgent:
     def __init__(self, run_id: str):

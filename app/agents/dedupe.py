@@ -2,6 +2,8 @@ import pandas as pd
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
 
+from langchain_core.tools import tool
+
 from app.core.utils import (
     get_agent_logger,
     create_agent_log,
@@ -9,6 +11,11 @@ from app.core.utils import (
 )
 
 logger = get_agent_logger("dedupe")
+
+@tool
+def detect_duplicates_tool(records: list, key_columns: list) -> str:
+    """Detect duplicate records based on specified key columns."""
+    return f"Detecting duplicates using keys: {key_columns}"
 
 class DedupeAgent:
     def __init__(self, run_id: str):

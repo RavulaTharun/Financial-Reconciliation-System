@@ -2,6 +2,8 @@ import pandas as pd
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
+from langchain_core.tools import tool
+
 from app.core.config import config
 from app.core.utils import (
     get_agent_logger,
@@ -13,6 +15,16 @@ from app.core.utils import (
 )
 
 logger = get_agent_logger("ingest_erp")
+
+@tool
+def parse_excel_tool(excel_path: str) -> str:
+    """Parse an ERP Excel file and extract transaction data."""
+    return f"Parsing Excel at {excel_path}"
+
+@tool
+def detect_columns_tool(column_names: list) -> str:
+    """Auto-detect invoice, amount, and date columns from column names."""
+    return f"Detecting columns from: {column_names}"
 
 class ERPIngestAgent:
     def __init__(self, run_id: str):

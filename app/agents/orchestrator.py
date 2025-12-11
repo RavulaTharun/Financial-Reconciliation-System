@@ -95,6 +95,12 @@ def dedupe_node(state: ReconciliationState) -> Dict[str, Any]:
     
     run_storage.update_run(run_id, current_step="dedupe", progress=35)
     
+    if state.get("bank_data") is None or state.get("erp_data") is None:
+        return {
+            "errors": ["Bank or ERP data not available"],
+            "status": "failed"
+        }
+    
     bank_df = state["bank_data"]["data"]
     erp_df = state["erp_data"]["data"]
     

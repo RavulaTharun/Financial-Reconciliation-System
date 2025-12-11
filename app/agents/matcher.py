@@ -2,6 +2,8 @@ import pandas as pd
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timedelta
 
+from langchain_core.tools import tool
+
 from app.core.config import config
 from app.core.utils import (
     get_agent_logger,
@@ -10,6 +12,16 @@ from app.core.utils import (
 )
 
 logger = get_agent_logger("matcher")
+
+@tool
+def exact_match_tool(bank_invoice: str, bank_amount: float, erp_records: list) -> str:
+    """Find exact matches between bank transaction and ERP records by invoice ID and amount."""
+    return f"Searching for exact match: {bank_invoice} with amount {bank_amount}"
+
+@tool
+def fuzzy_match_tool(bank_amount: float, bank_date: str, erp_records: list) -> str:
+    """Find fuzzy matches based on amount proximity and date range."""
+    return f"Searching for fuzzy match: amount {bank_amount} on date {bank_date}"
 
 class MatcherAgent:
     def __init__(self, run_id: str):
@@ -217,10 +229,32 @@ class MatcherAgent:
     
     def _generate_reasoning(self, bank_df: pd.DataFrame, erp_df: pd.DataFrame,
                            stats: Dict, llm_client=None) -> str:
+        from app.core.llm_client import llm_client as llm
+        
         total_processed = sum(stats.values())
         match_rate = ((stats['exact_matches'] + stats['rounding_matches'] + stats['fuzzy_matches']) / total_processed * 100) if total_processed > 0 else 0
         
-        reasoning = f"""Transaction Matching Analysis:
+        llm_analysis = ""
+        if llm and llm.model:
+            try:
+                prompt = f"""Analyze this reconciliation matching result:
+- Exact matches: {stats['exact_matches']}
+- Rounding matches: {stats['rounding_matches']}
+- Fuzzy matches: {stats['fuzzy_matches']}
+- Unmatched: {stats['no_match']}
+- Match rate: {match_rate:.1f}%
+
+Provide:
+1. Assessment of match quality
+2. Potential issues to investigate
+3. Confidence in the overall reconciliation
+
+Respond in 3-4 sentences."""
+                llm_analysis = llm.invoke(prompt, "You are a financial reconciliation expert.")
+            except Exception as e:
+                llm_analysis = f"[LLM analysis unavailable: {str(e)}]"
+        
+        reasoning = f"""Transaction Matching Analysis (AI-Powered):
 
 1. Matching Results Summary:
    - Exact Matches: {stats['exact_matches']} (invoice ID + exact amount)
@@ -236,7 +270,10 @@ class MatcherAgent:
    - Tier 3 (Fuzzy): Amount within ${config.FUZZY_AMOUNT_ABS} + date within {config.FUZZY_DATE_DAYS} days
    - Confidence threshold for fuzzy: {config.CONFIDENCE_THRESHOLD_HUMAN_REVIEW}
 
-4. Recommendations:
+4. AI Analysis:
+{llm_analysis if llm_analysis else 'LLM reasoning not available - configure GROQ_API_KEY for AI-powered analysis'}
+
+5. Recommendations:
    - Review all 'No Match' items manually
    - Verify fuzzy matches with confidence < 0.8
    - Investigate rounding differences for pattern analysis

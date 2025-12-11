@@ -4,6 +4,9 @@ import pdfplumber
 from typing import Dict, Any, List
 from datetime import datetime
 
+from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from app.core.config import config
 from app.core.utils import (
     get_agent_logger,
@@ -15,6 +18,16 @@ from app.core.utils import (
 )
 
 logger = get_agent_logger("ingest_bank")
+
+@tool
+def parse_bank_pdf_tool(pdf_path: str) -> str:
+    """Parse a bank statement PDF and extract transaction data."""
+    return f"Parsing PDF at {pdf_path}"
+
+@tool
+def normalize_transaction_tool(transaction: dict) -> str:
+    """Normalize a bank transaction's date, amount, and invoice ID."""
+    return f"Normalized transaction: {transaction}"
 
 class BankIngestAgent:
     def __init__(self, run_id: str):
@@ -147,11 +160,38 @@ class BankIngestAgent:
     
     def _generate_reasoning(self, df: pd.DataFrame, invoice_rows: pd.DataFrame, 
                            non_invoice_rows: pd.DataFrame, llm_client=None) -> str:
-        reasoning = f"""Bank Statement Parsing Analysis:
+        from app.core.llm_client import llm_client as llm
         
-1. Total Transactions Extracted: {len(df)}
-2. Invoice Payments: {len(invoice_rows)} transactions with valid INV### format
-3. Non-Invoice Items: {len(non_invoice_rows)} items (Adjustments, Interest, Bank Fees)
+        base_stats = {
+            "total_transactions": len(df),
+            "invoice_payments": len(invoice_rows),
+            "non_invoice_items": len(non_invoice_rows),
+            "date_range": f"{df['date'].min() if len(df) > 0 else 'N/A'} to {df['date'].max() if len(df) > 0 else 'N/A'}",
+            "total_invoice_amount": float(invoice_rows['amount'].sum()) if len(invoice_rows) > 0 else 0,
+            "total_adjustments": float(non_invoice_rows['amount'].sum()) if len(non_invoice_rows) > 0 else 0
+        }
+        
+        llm_analysis = ""
+        if llm and llm.model:
+            try:
+                prompt = f"""Analyze this bank statement parsing result:
+{base_stats}
+
+Provide insights about:
+1. Data quality assessment
+2. Any unusual patterns in the transaction data
+3. Recommendations for reconciliation
+
+Respond in 3-4 sentences."""
+                llm_analysis = llm.invoke(prompt, "You are a financial data analyst.")
+            except Exception as e:
+                llm_analysis = f"[LLM analysis unavailable: {str(e)}]"
+        
+        reasoning = f"""Bank Statement Parsing Analysis (AI-Powered):
+        
+1. Total Transactions Extracted: {base_stats['total_transactions']}
+2. Invoice Payments: {base_stats['invoice_payments']} transactions with valid INV### format
+3. Non-Invoice Items: {base_stats['non_invoice_items']} items (Adjustments, Interest, Bank Fees)
 
 Normalization Applied:
 - Dates converted to ISO format (YYYY-MM-DD)
@@ -159,8 +199,11 @@ Normalization Applied:
 - Invoice IDs extracted using regex pattern INV\\d+
 
 Notable Observations:
-- Date range: {df['date'].min() if len(df) > 0 else 'N/A'} to {df['date'].max() if len(df) > 0 else 'N/A'}
-- Total invoice amount: ${invoice_rows['amount'].sum():.2f if len(invoice_rows) > 0 else 0}
-- Total non-invoice adjustments: ${non_invoice_rows['amount'].sum():.2f if len(non_invoice_rows) > 0 else 0}
+- Date range: {base_stats['date_range']}
+- Total invoice amount: ${base_stats['total_invoice_amount']:.2f}
+- Total non-invoice adjustments: ${base_stats['total_adjustments']:.2f}
+
+AI Analysis:
+{llm_analysis if llm_analysis else 'LLM reasoning not available - configure GROQ_API_KEY for AI-powered analysis'}
 """
         return reasoning

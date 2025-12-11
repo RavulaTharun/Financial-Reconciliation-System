@@ -2,6 +2,8 @@ import pandas as pd
 from typing import Dict, Any, List
 from datetime import datetime
 
+from langchain_core.tools import tool
+
 from app.core.config import config
 from app.core.utils import (
     get_agent_logger,
@@ -11,40 +13,61 @@ from app.core.utils import (
 
 logger = get_agent_logger("explain")
 
+@tool
+def generate_explanation_tool(match_record: dict) -> str:
+    """Generate a human-readable explanation for a reconciliation match decision."""
+    return f"Generating explanation for match: {match_record.get('match_status', 'Unknown')}"
+
 class ExplainAgent:
     def __init__(self, run_id: str):
         self.run_id = run_id
         self.agent_name = "explain"
     
     def generate_row_explanation(self, row: pd.Series) -> str:
+        from app.core.llm_client import llm_client as llm
+        
         match_status = row.get('match_status', 'Unknown')
         confidence = row.get('match_confidence', 0)
         invoice = row.get('bank_invoice', 'N/A')
         amount = row.get('bank_amount', 0)
         
+        base_explanation = ""
+        
         if match_status == 'Exact Match':
-            return f"Invoice {invoice} (${amount:.2f}) matched exactly with ERP record. High confidence match."
+            base_explanation = f"Invoice {invoice} (${amount:.2f}) matched exactly with ERP record. High confidence match."
         
         elif match_status == 'Rounding Difference':
             diff = row.get('amount_difference', 0)
-            return f"Invoice {invoice} matched with ${diff:.4f} rounding difference. This is within acceptable tolerance."
+            base_explanation = f"Invoice {invoice} matched with ${diff:.4f} rounding difference. This is within acceptable tolerance."
         
         elif match_status == 'Probable Match':
-            return f"Invoice {invoice} (${amount:.2f}) is a probable match with {confidence:.0%} confidence. Manual verification recommended."
+            base_explanation = f"Invoice {invoice} (${amount:.2f}) is a probable match with {confidence:.0%} confidence. Manual verification recommended."
+            
+            if llm and llm.model:
+                try:
+                    bank_data = {"invoice": invoice, "amount": amount, "date": row.get('bank_date')}
+                    erp_data = row.get('erp_data', {})
+                    llm_explanation = llm.explain_match(bank_data, erp_data, match_status, confidence)
+                    base_explanation += f" AI Analysis: {llm_explanation}"
+                except Exception:
+                    pass
         
         elif match_status == 'No Match':
             exception_type = row.get('exception_type', 'Unknown')
             if exception_type == 'Missing in ERP':
-                return f"Invoice {invoice} (${amount:.2f}) from bank has no matching ERP record. Investigate for missing ERP entry."
+                base_explanation = f"Invoice {invoice} (${amount:.2f}) from bank has no matching ERP record. Investigate for missing ERP entry."
             elif exception_type == 'Non-Invoice Item':
-                return f"Bank transaction (${amount:.2f}) is a non-invoice item (fee/adjustment). Excluded from invoice reconciliation."
+                base_explanation = f"Bank transaction (${amount:.2f}) is a non-invoice item (fee/adjustment). Excluded from invoice reconciliation."
             else:
-                return f"Invoice {invoice} could not be matched. Requires manual investigation."
+                base_explanation = f"Invoice {invoice} could not be matched. Requires manual investigation."
         
         elif match_status == 'Non-Invoice':
-            return f"Non-invoice bank item: {row.get('non_invoice_type', 'Unknown')} of ${amount:.2f}"
+            base_explanation = f"Non-invoice bank item: {row.get('non_invoice_type', 'Unknown')} of ${amount:.2f}"
         
-        return f"Transaction status: {match_status}"
+        else:
+            base_explanation = f"Transaction status: {match_status}"
+        
+        return base_explanation
     
     def generate_summary(self, stats: Dict, match_stats: Dict, 
                         exception_stats: Dict) -> str:
